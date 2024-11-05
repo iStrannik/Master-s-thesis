@@ -3,7 +3,7 @@ use winterfell::{
     crypto::{hashers::Blake3_256, DefaultRandomCoin, MerkleTree}, math::{fields::f128::BaseElement, FieldElement}, matrix::ColMatrix, AuxRandElements, DefaultConstraintEvaluator, DefaultTraceLde, FieldExtension, PartitionOptions, Proof, ProofOptions, Prover, StarkDomain, Trace, TraceInfo, TracePolyTable, TraceTable
 };
 
-use crate::{air::{PublicInputs, WorkAir}, utils};
+use crate::{air::{PublicInputs, WorkAir}, utils, air::COUNT};
 
 type Blake3 = Blake3_256<BaseElement>;
 
@@ -31,8 +31,7 @@ impl Prover for WorkProver {
     fn get_pub_inputs(&self, trace: &Self::Trace) -> PublicInputs {
         let last_step = trace.length() - 1;
         PublicInputs {
-            fb_0: trace.get(0, 0),
-            fb_1: trace.get(1, 0),
+            fb_start: core::array::from_fn(|i| trace.get(i, 0)),
             fb_n: trace.get(0, last_step),
         }
     }
@@ -62,25 +61,31 @@ impl Prover for WorkProver {
 }
 
 
-pub fn build_do_work_trace(fb_0: BaseElement, fb_1: BaseElement, n: usize) -> TraceTable<BaseElement> {
-    let trace_width = 2;
+pub fn build_do_work_trace(fb_start: [BaseElement; COUNT], n: usize) -> TraceTable<BaseElement> {
+    let trace_width = COUNT;
     let mut trace = TraceTable::new(trace_width, n);
 
     trace.fill(
         |state| {
-            state[0] = fb_0;
-            state[1] = fb_1;
+            for i in 0..COUNT {
+                state[i] = fb_start[i];
+            }
         },
         |_, state| {
-            (state[0], state[1]) = (state[1], state[0] + state[1]);
+            let mut sum = state[COUNT - 1];
+            for i in 0..COUNT-1 {
+                sum += state[i];
+                state[i] = state[i + 1];
+            }
+            state[COUNT - 1] = sum;
         },
     );
 
     trace
 }
 
-pub fn prove_work(fb_0: BaseElement, fb_1: BaseElement, n: usize, display_table: bool) -> (BaseElement, Proof) {
-    let trace = build_do_work_trace(fb_0, fb_1, n);
+pub fn prove_work(fb_start: [BaseElement; COUNT], n: usize, display_table: bool) -> (BaseElement, Proof) {
+    let trace = build_do_work_trace(fb_start, n);
     if display_table {
         utils::display_trace(&trace);
     }

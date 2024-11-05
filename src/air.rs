@@ -2,22 +2,24 @@ use winterfell::{
     math::{fields::f128::BaseElement, FieldElement, ToElements}, Air, AirContext, Assertion, EvaluationFrame, ProofOptions, TraceInfo, TransitionConstraintDegree
 };
 
+pub const COUNT: usize = 254;
+
 pub struct PublicInputs {
-    pub(crate) fb_0: BaseElement,
-    pub(crate) fb_1: BaseElement,
+    pub(crate) fb_start: [BaseElement; COUNT],
     pub(crate) fb_n: BaseElement,
 }
 
 impl ToElements<BaseElement> for PublicInputs {
     fn to_elements(&self) -> Vec<BaseElement> {
-        vec![self.fb_0, self.fb_1, self.fb_n]
+        let mut a = Vec::from(self.fb_start);
+        a.extend([self.fb_n]);
+        a
     }
 }
 
 pub struct WorkAir {
     context: AirContext<BaseElement>,
-    fb_0: BaseElement,
-    fb_1: BaseElement,
+    fb_start: [BaseElement; COUNT],
     fb_n: BaseElement,
 }
 
@@ -26,16 +28,15 @@ impl Air for WorkAir {
     type PublicInputs = PublicInputs;
 
     fn new(trace_info: TraceInfo, pub_inputs: PublicInputs, options: ProofOptions) -> Self {
-        assert_eq!(2, trace_info.width());
+        assert_eq!(COUNT, trace_info.width());
 
-        let degrees = vec![TransitionConstraintDegree::new(1), TransitionConstraintDegree::new(1)];
+        let degrees = vec![TransitionConstraintDegree::new(1); COUNT];
 
-        let num_assertions = 3;
+        let num_assertions = COUNT + 1;
 
         WorkAir {
             context: AirContext::new(trace_info, degrees, num_assertions, options),
-            fb_0: pub_inputs.fb_0,
-            fb_1: pub_inputs.fb_1,
+            fb_start: pub_inputs.fb_start,
             fb_n: pub_inputs.fb_n,
         }
     }
@@ -47,23 +48,27 @@ impl Air for WorkAir {
         result: &mut [E],
     ) {
         let current_state = frame.current();
-        let next_state = current_state[0] + current_state[1];
+        let mut next_state = current_state[0];
+        for i in 1..COUNT {
+            next_state += current_state[i];
+        }
         let next_state_in_trace = frame.next();
 
         // println!("{}", result.len());
         // println!("{}", next_state_in_trace.len());
-
-        result[0] = next_state_in_trace[0] - current_state[1];
-        result[1] = next_state_in_trace[1] - next_state;
+        for i in 0..COUNT-1 {
+            result[i] = next_state_in_trace[i] - current_state[i + 1]
+        }
+        result[COUNT - 1] = next_state_in_trace[COUNT - 1] - next_state;
     }
 
     fn get_assertions(&self) -> Vec<Assertion<Self::BaseField>> {
         let last_step = self.trace_length() - 1;
-        vec![
-            Assertion::single(0, 0, self.fb_0),
-            Assertion::single(1, 0, self.fb_1),
-            Assertion::single(0, last_step, self.fb_n),
-        ]
+        let mut result = vec![Assertion::single(0, last_step, self.fb_n)];
+        for i in 0..COUNT {
+            result.push(Assertion::single(i, 0, self.fb_start[i]));
+        }
+        result
     }
 
     fn context(&self) -> &AirContext<Self::BaseField> {
